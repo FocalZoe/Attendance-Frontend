@@ -6,6 +6,7 @@ import { Dashboard } from './components/Dashboard';
 import { HistoryList } from './components/HistoryList';
 import { CameraSimulatorModal } from './components/CameraSimulatorModal';
 import { X, Maximize2 } from 'lucide-react';
+import { getApiUrl, getWsUrl } from './config/api';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history'>('dashboard');
@@ -18,7 +19,7 @@ export const App: React.FC = () => {
   // 抓取 Supabase 歷史數據
   const fetchHistory = useCallback(async () => {
     try {
-      const res = await fetch('/api/history');
+      const res = await fetch(getApiUrl('/api/history'));
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.records)) {
@@ -37,17 +38,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     fetchHistory();
 
-    // 判斷 WebSocket 伺服器網址
-    const getWsUrl = () => {
-      if (import.meta.env.VITE_WS_URL) {
-        return import.meta.env.VITE_WS_URL;
-      }
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return 'ws://localhost:5000';
-      }
-      // 線上正式環境：連接至 Render 後端伺服器 WebSocket 節點
-      return 'wss://attendance-backend-p1pj.onrender.com';
-    };
     const wsUrl = getWsUrl();
 
     let socket: WebSocket | null = null;

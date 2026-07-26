@@ -1,6 +1,7 @@
 // TEAM_001: 真實網路攝像機 (Real Webcam) 拍照與 Ameba JSON 發送彈窗
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Camera, Send, RefreshCw, VideoOff, CheckCircle2, AlertCircle } from 'lucide-react';
+import { getApiUrl } from '../config/api';
 
 interface RealCameraModalProps {
   isOpen: boolean;
@@ -126,7 +127,7 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
         return;
       }
 
-      const response = await fetch('/api/telemetry', {
+      const response = await fetch(getApiUrl('/api/telemetry'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
