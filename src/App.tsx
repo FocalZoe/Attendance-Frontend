@@ -37,9 +37,18 @@ export const App: React.FC = () => {
   useEffect(() => {
     fetchHistory();
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname === 'localhost' ? 'localhost:5000' : window.location.host;
-    const wsUrl = `${wsProtocol}//${wsHost}`;
+    // 判斷 WebSocket 伺服器網址
+    const getWsUrl = () => {
+      if (import.meta.env.VITE_WS_URL) {
+        return import.meta.env.VITE_WS_URL;
+      }
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'ws://localhost:5000';
+      }
+      // 線上正式環境：連接至 Render 後端伺服器 WebSocket 節點
+      return 'wss://attendance-backend-p1pj.onrender.com';
+    };
+    const wsUrl = getWsUrl();
 
     let socket: WebSocket | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
