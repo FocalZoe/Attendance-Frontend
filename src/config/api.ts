@@ -28,7 +28,7 @@ export const getApiUrl = (path: string): string => {
  * 1. VITE_WS_URL 環境變數
  * 2. VITE_API_BASE_URL 環境變數（自動轉為 ws:// 或 wss://）
  * 3. 本地開發環境 fallback (ws://localhost:5000)
- * 4. 線上 Render 生產環境 fallback (wss://attendance-backend-p1pj.onrender.com)
+ * 4. 根據當前 window.location 自動推導 (wss://${window.location.host})
  */
 export const getWsUrl = (): string => {
   if (import.meta.env.VITE_WS_URL) {
@@ -40,9 +40,14 @@ export const getWsUrl = (): string => {
     return apiBaseUrl.replace(/^http/, 'ws');
   }
 
-  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-    return 'ws://localhost:5000';
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'ws://localhost:5000';
+    }
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProtocol}//${window.location.host}`;
   }
 
-  return 'wss://attendance-backend-p1pj.onrender.com';
+  return 'ws://localhost:5000';
 };
