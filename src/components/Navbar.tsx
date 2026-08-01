@@ -56,10 +56,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
           <div>
             <h1 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '0.5px' }}>
-              Zoe Attendance
+              即時考勤系統
             </h1>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Ameba 相機即時考勤系統
+              Ameba 相機打卡
             </span>
           </div>
         </div>
@@ -117,7 +117,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* 右側：WebSocket 連線狀態燈號標籤 + 相機測試按鈕 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          
+
           {/* 即時連線狀態燈標 */}
           <div style={{
             display: 'flex',

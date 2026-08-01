@@ -88,7 +88,7 @@ export const App: React.FC = () => {
             if (payload.type === 'NEW_ATTENDANCE_RECORD' && payload.data) {
               const newRec: AttendanceRecord = payload.data;
               console.log('[TEAM_005 WS Client] 收到即時打卡推播！', newRec);
-              
+
               setLatestRecord(newRec); // 將這筆資料設為最新紀錄
               setHistoryRecords((prev) => [newRec, ...prev]); // 把新紀錄插入到列表的最頂端
             }
@@ -125,7 +125,7 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      
+
       {/* 1. 頂部導覽列：負責切換分頁與顯示連線燈標 */}
       <Navbar
         activeTab={activeTab}
