@@ -30,22 +30,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // 格式化最新時間
   const formattedLatestTime = latestRecord
     ? new Date(latestRecord.create_at).toLocaleString('zh-TW', {
-        hour12: false,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
     : '無紀錄';
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      
+
       {/* 頂部數據統計卡片網格 (2 欄) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-        
+
         {/* 卡片 1：今日通報總數 */}
         <div className="glass-panel" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{
@@ -80,12 +80,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* 主監控區域：左側最新照片大圖看板，右側最近 5 筆刷卡動態 */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
-        
+
         {/* 左側：最新刷卡即時看板 */}
         <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              📸 最新捕捉考勤影像與訊息
+              最新捕捉考勤影像與訊息
             </h3>
             {latestRecord && (
               <span className="badge badge-success">
@@ -171,7 +171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* 右側：最近 5 筆打卡即時動態清單 */}
         <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>⚡ 最近刷卡動態 (Top 5)</h3>
-          
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', maxHeight: '480px' }}>
             {historyRecords.slice(0, 5).map((rec) => (
               <div
