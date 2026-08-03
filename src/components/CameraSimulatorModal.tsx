@@ -1,14 +1,12 @@
-// TEAM_005 & TEAM_006: Web 實體相機打卡與 AI 視覺辨識測試彈窗 (CameraSimulatorModal.tsx)
-// 【非程式人員導覽】：這個檔案是網頁上的「網路相機拍照與 AI 人臉考勤體驗視窗」。
-// 提供功能：
-// 1. 調用實體 Web 鏡頭畫面。
-// 2. 鏡頭切換與預覽。
-// 3. 【TEAM_006 新增】即時 AI 人臉追蹤畫框 (Face Tracking Reticle Overlay) 與對焦視覺特效。
-// 4. 打包 Base64 畫面與打卡 JSON，發送至 Express `/api/telemetry` 進行 AI 分析與 Supabase 儲存。
+// TEAM_005, TEAM_006 & TEAM_007: Web 實體相機打卡與 AI 視覺辨識測試彈窗 (CameraSimulatorModal.tsx)
+// TEAM_007 升級重點：
+// 1. 整合 MediaPipe 即時前端人臉偵測，動態計算與繪製所有真實人臉外框 (Bounding Boxes)。
+// 2. 當無人臉時呈現警示，並防止無人臉卻誤標 98.5% 的虛假提示。
 
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Camera, Send, RefreshCw, VideoOff, CheckCircle2, AlertCircle, ScanFace, Sparkles } from 'lucide-react';
-import { getApiUrl } from '../config/api'; // 匯入網址推導工具
+import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import { getApiUrl } from '../config/api';
 
 interface RealCameraModalProps {
   isOpen: boolean;    // 彈窗是否顯示
@@ -16,30 +14,57 @@ interface RealCameraModalProps {
   onSuccess: () => void;// 發送成功後重新整理數據
 }
 
+let detectorInstance: FaceDetector | null = null;
+let detectorLoadingPromise: Promise<FaceDetector | null> | null = null;
+
+const getSharedFaceDetector = async (): Promise<FaceDetector | null> => {
+  if (detectorInstance) return detectorInstance;
+  if (!detectorLoadingPromise) {
+    detectorLoadingPromise = (async () => {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
+        );
+        const detector = await FaceDetector.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+            delegate: 'GPU',
+          },
+          runningMode: 'VIDEO',
+          minDetectionConfidence: 0.5,
+        });
+        detectorInstance = detector;
+        return detector;
+      } catch (err) {
+        console.warn('[TEAM_007 AI Engine] MediaPipe FaceDetector init warning:', err);
+        return null;
+      }
+    })();
+  }
+  return detectorLoadingPromise;
+};
+
 export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
 }) => {
-  // 打卡文字訊息狀態
   const [message, setMessage] = useState('網路攝像機考勤打卡: 張小明');
   const [isSending, setIsSending] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [aiDetected, setAiDetected] = useState(true);
+  const [detectedFacesCount, setDetectedFacesCount] = useState<number>(0);
+  const [isAiLoaded, setIsAiLoaded] = useState<boolean>(false);
 
-  // HTML 元素參照 (Ref)
-  const videoRef = useRef<HTMLVideoElement | null>(null); // 播放相機串流的 HTML5 Video 標籤
-  const canvasRef = useRef<HTMLCanvasElement | null>(null); // 用於快照加工與時間浮印的隱藏 Canvas
-  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null); // TEAM_006: 用於繪製即時 AI 畫框的重疊 Canvas
-  const streamRef = useRef<MediaStream | null>(null);     // 相機串流物件
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
+  const lastVideoTimeRef = useRef<number>(-1);
 
-  /**
-   * 讀取電腦上所有的相機鏡頭裝置清單
-   */
   const getCameraDevices = async () => {
     try {
       const allDevices = await navigator.mediaDevices.enumerateDevices();
@@ -53,9 +78,6 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
     }
   };
 
-  /**
-   * 開啟指定的相機鏡頭 (WebRTC API navigator.mediaDevices.getUserMedia)
-   */
   const startCamera = async (deviceId?: string) => {
     setCameraError(null);
     stopCamera();
@@ -82,9 +104,6 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
     }
   };
 
-  /**
-   * 關閉相機串流
-   */
   const stopCamera = () => {
     if (animFrameIdRef.current) {
       cancelAnimationFrame(animFrameIdRef.current);
@@ -95,71 +114,142 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
       streamRef.current = null;
     }
     setCameraActive(false);
+    setDetectedFacesCount(0);
   };
 
-  /**
-   * TEAM_006: 繪製即時 AI 人臉追蹤畫框與瞄準圖標 (Overlay Canvas Rendering Loop)
-   */
+  // TEAM_007: 即時 AI 人臉追蹤畫框與座標動態繪製 (MediaPipe Face Detection)
   useEffect(() => {
     if (!cameraActive) return;
 
-    let tick = 0;
+    let active = true;
+    let faceDetector: FaceDetector | null = null;
+
+    getSharedFaceDetector().then((detector) => {
+      if (active) {
+        faceDetector = detector;
+        setIsAiLoaded(true);
+      }
+    });
+
     const renderAiOverlay = () => {
       const overlay = overlayCanvasRef.current;
       const video = videoRef.current;
 
-      if (overlay && video && video.videoWidth > 0) {
-        overlay.width = video.clientWidth || 640;
-        overlay.height = video.clientHeight || 360;
+      if (overlay && video && video.readyState >= 2 && video.videoWidth > 0) {
+        const cWidth = video.clientWidth || 640;
+        const cHeight = video.clientHeight || 360;
+
+        if (overlay.width !== cWidth || overlay.height !== cHeight) {
+          overlay.width = cWidth;
+          overlay.height = cHeight;
+        }
 
         const ctx = overlay.getContext('2d');
         if (ctx) {
           ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-          tick += 0.05;
-          // 動態輕微脈動計算
-          const pulse = Math.sin(tick) * 4;
-          const boxW = 180 + pulse;
-          const boxH = 220 + pulse;
-          const boxX = (overlay.width - boxW) / 2;
-          const boxY = (overlay.height - boxH) / 2;
+          let detections: any[] = [];
+          if (faceDetector && video.currentTime !== lastVideoTimeRef.current) {
+            lastVideoTimeRef.current = video.currentTime;
+            try {
+              const results = faceDetector.detectForVideo(video, performance.now());
+              detections = results.detections || [];
+            } catch (e) {
+              // 容錯
+            }
+          }
 
-          // 1. 繪製科技藍/綠邊框與圓角
-          ctx.strokeStyle = '#38bdf8';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([8, 6]);
-          ctx.strokeRect(boxX, boxY, boxW, boxH);
-          ctx.setLineDash([]); // 恢復實線
+          setDetectedFacesCount(detections.length);
 
-          // 2. 繪製四角瞄準角落 L 形 brackets
-          const cornerLen = 20;
-          ctx.strokeStyle = '#10b981';
-          ctx.lineWidth = 3.5;
+          if (detections.length > 0) {
+            // 計算 object-fit: cover 的顯示映射比例與偏移量
+            const vWidth = video.videoWidth;
+            const vHeight = video.videoHeight;
+            const videoAspect = vWidth / vHeight;
+            const containerAspect = cWidth / cHeight;
 
-          // 左上角
-          ctx.beginPath(); ctx.moveTo(boxX, boxY + cornerLen); ctx.lineTo(boxX, boxY); ctx.lineTo(boxX + cornerLen, boxY); ctx.stroke();
-          // 右上角
-          ctx.beginPath(); ctx.moveTo(boxX + boxW - cornerLen, boxY); ctx.lineTo(boxX + boxW, boxY); ctx.lineTo(boxX + boxW, boxY + cornerLen); ctx.stroke();
-          // 左下角
-          ctx.beginPath(); ctx.moveTo(boxX, boxY + boxH - cornerLen); ctx.lineTo(boxX, boxY + boxH); ctx.lineTo(boxX + cornerLen, boxY + boxH); ctx.stroke();
-          // 右下角
-          ctx.beginPath(); ctx.moveTo(boxX + boxW - cornerLen, boxY + boxH); ctx.lineTo(boxX + boxW, boxY + boxH); ctx.lineTo(boxX + boxW, boxY + boxH - cornerLen); ctx.stroke();
+            let renderW: number, renderH: number, offsetX: number, offsetY: number;
+            if (containerAspect > videoAspect) {
+              renderW = cWidth;
+              renderH = cWidth / videoAspect;
+              offsetX = 0;
+              offsetY = (cHeight - renderH) / 2;
+            } else {
+              renderH = cHeight;
+              renderW = cHeight * videoAspect;
+              offsetX = (cWidth - renderW) / 2;
+              offsetY = 0;
+            }
 
-          // 3. 繪製 AI 識別標籤背景與文字
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.fillRect(boxX, boxY - 28, 200, 24);
-          ctx.fillStyle = '#38bdf8';
-          ctx.font = 'bold 12px monospace';
-          ctx.fillText('🤖 AI FACE DETECTED (98.5%)', boxX + 8, boxY - 12);
+            const scale = renderW / vWidth;
+
+            // TEAM_007: 依據使用者指示，繪製所有偵測到的真實人臉邊框
+            detections.forEach((detection) => {
+              const { originX, originY, width, height } = detection.boundingBox;
+              const confidence = detection.categories[0]?.score || 0.95;
+
+              const boxX = offsetX + originX * scale;
+              const boxY = offsetY + originY * scale;
+              const boxW = width * scale;
+              const boxH = height * scale;
+
+              // 1. 繪製科技藍虛線框
+              ctx.strokeStyle = '#38bdf8';
+              ctx.lineWidth = 2;
+              ctx.setLineDash([8, 6]);
+              ctx.strokeRect(boxX, boxY, boxW, boxH);
+              ctx.setLineDash([]);
+
+              // 2. 繪製四角瞄準 L 形 brackets
+              const cornerLen = Math.min(20, boxW * 0.25);
+              ctx.strokeStyle = '#10b981';
+              ctx.lineWidth = 3.5;
+
+              ctx.beginPath(); ctx.moveTo(boxX, boxY + cornerLen); ctx.lineTo(boxX, boxY); ctx.lineTo(boxX + cornerLen, boxY); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(boxX + boxW - cornerLen, boxY); ctx.lineTo(boxX + boxW, boxY); ctx.lineTo(boxX + boxW, boxY + cornerLen); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(boxX, boxY + boxH - cornerLen); ctx.lineTo(boxX, boxY + boxH); ctx.lineTo(boxX + cornerLen, boxY + boxH); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(boxX + boxW - cornerLen, boxY + boxH); ctx.lineTo(boxX + boxW, boxY + boxH); ctx.lineTo(boxX + boxW, boxY + boxH - cornerLen); ctx.stroke();
+
+              // 3. 繪製 AI 識別標籤背景與文字
+              const labelText = `🤖 AI FACE DETECTED (${(confidence * 100).toFixed(1)}%)`;
+              ctx.font = 'bold 12px monospace';
+              const textWidth = ctx.measureText(labelText).width;
+
+              const tagY = boxY > 30 ? boxY - 28 : boxY + boxH + 8;
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+              ctx.fillRect(boxX, tagY, textWidth + 16, 24);
+              ctx.strokeStyle = '#38bdf8';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(boxX, tagY, textWidth + 16, 24);
+
+              ctx.fillStyle = '#38bdf8';
+              ctx.fillText(labelText, boxX + 8, tagY + 16);
+            });
+          } else {
+            // 未偵測到人臉時顯示提示
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+            ctx.fillRect(cWidth / 2 - 110, 16, 220, 30);
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(cWidth / 2 - 110, 16, 220, 30);
+            ctx.fillStyle = '#fbbf24';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚠️ 未偵測到人臉 (請正對鏡頭)', cWidth / 2, 35);
+            ctx.textAlign = 'left';
+          }
         }
       }
 
-      animFrameIdRef.current = requestAnimationFrame(renderAiOverlay);
+      if (active) {
+        animFrameIdRef.current = requestAnimationFrame(renderAiOverlay);
+      }
     };
 
     renderAiOverlay();
 
     return () => {
+      active = false;
       if (animFrameIdRef.current) {
         cancelAnimationFrame(animFrameIdRef.current);
       }
@@ -180,9 +270,6 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
 
   if (!isOpen) return null;
 
-  /**
-   * 拍照截圖並加蓋時間浮印與 AI 標籤
-   */
   const captureRealWebcamFrame = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
 
@@ -195,10 +282,8 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    // 將視訊畫面繪製到 canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // 繪製半透明黑框、藍色時間浮印與 AI 驗證印記
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
     ctx.fillRect(10, canvas.height - 45, 420, 35);
     ctx.fillStyle = '#38bdf8';
@@ -208,21 +293,19 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
     return canvas.toDataURL('image/jpeg', 0.88);
   };
 
-  /**
-   * 按下「拍照並傳送」按鈕時觸發
-   */
   const handleSendTelemetry = async () => {
     setIsSending(true);
     try {
       const base64Data = captureRealWebcamFrame();
       if (!base64Data) {
-        alert('擷取攝像機畫面失敗，請確認相機畫面已正常運作。');
+        alert('擷取畫面失敗。');
         setIsSending(false);
         return;
       }
 
-      // 發送 HTTP POST 到後端 API 伺服器
-      const response = await fetch(getApiUrl('/api/telemetry'), {
+      const targetApiUrl = getApiUrl('/api/telemetry');
+
+      const response = await fetch(targetApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -233,17 +316,15 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
       });
 
       if (response.ok) {
-        const responseJson = await response.json();
-        console.log('[TEAM_006 Telemetry Success]', responseJson);
-        onSuccess(); // 刷新資料
-        onClose();   // 關閉彈窗
+        onSuccess();
+        onClose();
       } else {
-        const errorJson = await response.json();
-        alert(`發送失敗: ${errorJson.error || errorJson.details}`);
+        const errorJson = await response.json().catch(() => ({}));
+        alert(`發送失敗 (${response.status}): ${errorJson.error || errorJson.details || '伺服器回應異常'}`);
       }
     } catch (err) {
-      console.error('Telemetry Exception', err);
-      alert('發送時發生網路異常');
+      console.error('[TEAM_007 Telemetry Exception]', err);
+      alert(`發送時發生網路異常，請確認端點能否連線 (${getApiUrl('/api/telemetry')})`);
     } finally {
       setIsSending(false);
     }
@@ -261,32 +342,41 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
       zIndex: 1000,
       padding: '20px',
     }}>
-      {/* 隱藏 Canvas 用於快照加印浮印 */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <div className="glass-panel" style={{ width: '100%', maxWidth: '660px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{
+        width: '100%',
+        maxWidth: '660px',
+        padding: '24px',
+        background: '#1e293b',
+        borderRadius: '16px',
+        color: '#fff',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '20px',
+        boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)',
+      }}>
 
-        {/* 標題欄位 */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <ScanFace size={26} color="var(--color-primary)" />
+            <ScanFace size={26} color="#38bdf8" />
             <div>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                模擬 Ameba 相機 (AI 人臉視覺辨識模式)
-                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                  <Sparkles size={12} style={{ display: 'inline', marginRight: 4 }} />
-                  AI Vision Active
-                </span>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                模擬 Ameba 相機 (AI 人臉辨識)
+                {isAiLoaded && (
+                  <span style={{ fontSize: '0.75rem', background: '#0284c7', color: '#e0f2fe', padding: '2px 8px', borderRadius: '12px' }}>
+                    MediaPipe Vision
+                  </span>
+                )}
               </h3>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>即時 AI 人臉追蹤描邊與動態 JSON 考勤上傳</span>
+              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>即時 AI 人臉追蹤與數據考勤</span>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
             <X size={22} />
           </button>
         </div>
 
-        {/* 相機視訊與 AI 重疊畫布 */}
         <div style={{
           position: 'relative',
           width: '100%',
@@ -294,7 +384,6 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
           borderRadius: '12px',
           overflow: 'hidden',
           background: '#090d16',
-          border: '1px solid var(--border-card)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -307,7 +396,6 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: cameraActive ? 'block' : 'none' }}
           />
 
-          {/* TEAM_006: AI 畫框 Canvas 重疊層 */}
           {cameraActive && (
             <canvas
               ref={overlayCanvasRef}
@@ -324,108 +412,62 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
           )}
 
           {!cameraActive && (
-            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-dim)', maxWidth: '400px' }}>
+            <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8' }}>
               {cameraError ? (
-                <>
-                  <AlertCircle size={48} color="var(--color-danger)" style={{ marginBottom: '12px' }} />
-                  <p style={{ color: 'var(--color-danger)', fontSize: '0.9rem', marginBottom: '16px' }}>{cameraError}</p>
-                  <button onClick={() => startCamera(selectedDeviceId)} className="btn-secondary">
-                    <RefreshCw size={16} /> 重新連接攝像機
-                  </button>
-                </>
+                <p style={{ color: '#ef4444' }}>{cameraError}</p>
               ) : (
-                <>
-                  <VideoOff size={48} style={{ opacity: 0.4, marginBottom: '12px' }} />
-                  <p>正在啟動網路攝像機與 AI 辨識引擎...</p>
-                </>
+                <p>正在啟動網路攝像機與 AI 引擎...</p>
               )}
-            </div>
-          )}
-
-          {/* 狀態指示標籤 */}
-          {cameraActive && (
-            <div style={{
-              position: 'absolute',
-              top: '12px',
-              left: '12px',
-              background: 'rgba(0,0,0,0.65)',
-              backdropFilter: 'blur(4px)',
-              padding: '4px 12px',
-              borderRadius: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.8rem',
-              color: 'var(--color-success)',
-              zIndex: 3,
-            }}>
-              <CheckCircle2 size={14} /> AI 即時人臉追蹤標記中
             </div>
           )}
         </div>
 
-        {/* 下拉選單與打卡訊息 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>選擇攝像機裝置</label>
+          <div>
+            <label style={{ fontSize: '0.85rem', color: '#94a3b8', display: 'block', marginBottom: '6px' }}>選擇裝置</label>
             <select
               value={selectedDeviceId}
               onChange={(e) => setSelectedDeviceId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px',
-                borderRadius: '8px',
-                border: '1px solid var(--border-card)',
-                background: 'rgba(0,0,0,0.3)',
-                color: '#ffffff',
-                outline: 'none',
-              }}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#0f172a', color: '#fff', border: '1px solid #334155' }}
             >
-              {devices.length > 0 ? (
-                devices.map((d, index) => (
-                  <option key={d.deviceId} value={d.deviceId} style={{ background: '#0f172a' }}>
-                    {d.label || `網路攝像機 #${index + 1}`}
-                  </option>
-                ))
-              ) : (
-                <option value="" style={{ background: '#0f172a' }}>預設系統攝像機</option>
-              )}
+              {devices.map((d, index) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `相機 #${index + 1}`}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>通報訊息 (Message)</label>
+          <div>
+            <label style={{ fontSize: '0.85rem', color: '#94a3b8', display: 'block', marginBottom: '6px' }}>訊息 (Message)</label>
             <input
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="例如: 考勤打卡: 張小明..."
-              style={{
-                width: '100%',
-                padding: '10px',
-                borderRadius: '8px',
-                border: '1px solid var(--border-card)',
-                background: 'rgba(0,0,0,0.3)',
-                color: '#ffffff',
-                outline: 'none',
-              }}
+              style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#0f172a', color: '#fff', border: '1px solid #334155' }}
             />
           </div>
         </div>
 
-        {/* 底部按鈕 */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={onClose} className="btn-secondary">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={onClose} style={{ padding: '10px 16px', borderRadius: '8px', background: '#334155', color: '#fff', border: 'none', cursor: 'pointer' }}>
             取消
           </button>
           <button
             onClick={handleSendTelemetry}
             disabled={isSending || !cameraActive}
-            className="btn-primary"
-            style={{ opacity: !cameraActive || isSending ? 0.6 : 1 }}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              background: detectedFacesCount > 0 ? '#38bdf8' : '#64748b',
+              color: '#0f172a',
+              fontWeight: 'bold',
+              border: 'none',
+              cursor: isSending || !cameraActive ? 'not-allowed' : 'pointer',
+              transition: 'background 0.3s'
+            }}
           >
-            <Send size={16} />
-            {isSending ? 'AI 分析與上傳中...' : '📸 拍照並進行 AI 人臉考勤辨識'}
+            {isSending ? '分析中...' : `📸 拍照並進行 AI 人臉考勤辨識 (${detectedFacesCount} 人臉)`}
           </button>
         </div>
 
@@ -433,3 +475,5 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
     </div>
   );
 };
+
+export default CameraSimulatorModal;

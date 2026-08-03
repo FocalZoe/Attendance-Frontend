@@ -12,7 +12,10 @@ export const getApiBaseUrl = (): string => {
   if (envUrl) {
     return envUrl.replace(/\/+$/, ''); // 去除末尾多餘的斜線
   }
-  return ''; // 若未設定環境變數，預設使用相對路徑
+  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://localhost:3000';
+  }
+  return ''; // 若未設定環境變數且非本機，預設使用相對路徑
 };
 
 /**
