@@ -325,6 +325,15 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
         return;
       }
 
+      // TEAM_007: 打包 MediaPipe 現場偵測到之真人人臉真實座標
+      const detectedFacesPayload = (lastDetectionsRef.current || []).map((det) => ({
+        x: Math.round(det.boundingBox.originX),
+        y: Math.round(det.boundingBox.originY),
+        width: Math.round(det.boundingBox.width),
+        height: Math.round(det.boundingBox.height),
+        confidence: det.categories[0]?.score || 0.95,
+      }));
+
       const targetApiUrl = getApiUrl('/api/telemetry');
 
       const response = await fetch(targetApiUrl, {
@@ -334,6 +343,7 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
           message: message,
           file: base64Data,
           timestamp: new Date().toISOString(),
+          detected_faces: detectedFacesPayload,
         }),
       });
 
