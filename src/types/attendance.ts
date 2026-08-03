@@ -2,6 +2,19 @@
 // 【非程式人員導覽】：這個檔案是我們資料的「表格欄位規格說明書」。
 // 在 TypeScript 中，定義 Interface 規範欄位型態，並包含 TEAM_006 的 ai_analysis AI 辨識資訊。
 
+export interface FaceBoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DetectedFaceInfo {
+  bounding_box: FaceBoundingBox;
+  confidence: number;
+  recognized_person: string;
+}
+
 export interface AiAnalysisInfo {
   engine?: string;
   detected?: boolean;
@@ -9,6 +22,8 @@ export interface AiAnalysisInfo {
   confidence?: number;
   recognized_person?: string;
   face_count?: number;
+  bounding_box?: FaceBoundingBox;
+  faces?: DetectedFaceInfo[];
   landmarks_count?: number;
   quality_score?: number;
 }

@@ -12,7 +12,7 @@ import { Clock, CheckCircle2, AlertCircle, Eye } from 'lucide-react';
 interface DashboardProps {
   latestRecord: AttendanceRecord | null;         // 最新一筆打卡紀錄
   historyRecords: AttendanceRecord[];             // 全部紀錄
-  onOpenImageModal: (url: string) => void;        // 開啟照片大圖的函式
+  onOpenImageModal: (record: AttendanceRecord) => void; // 開啟照片大圖的函式
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -98,7 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {/* 大圖容器 */}
               <div
-                onClick={() => onOpenImageModal(latestRecord.file_url)}
+                onClick={() => onOpenImageModal(latestRecord)}
                 style={{
                   position: 'relative',
                   width: '100%',
@@ -176,7 +176,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {historyRecords.slice(0, 5).map((rec) => (
               <div
                 key={rec.id}
-                onClick={() => onOpenImageModal(rec.file_url)}
+                onClick={() => onOpenImageModal(rec)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',

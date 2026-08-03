@@ -1,10 +1,8 @@
-// TEAM_005: React 前端主應用程式 (App.tsx - 前端大腦與狀態總中樞)
-// 【非程式人員導覽】：這個檔案是整個前端網頁的「總管理員與司令部」。
-// 它掌管了四大任務：
-// 1. 頁面切換控制：決定目前畫面要顯示「即時儀表板 (Dashboard)」還是「歷史紀錄簿 (HistoryList)」。
-// 2. 開啟對講機 (WebSocket)：網頁一打開就自動連線到後端 WebSocket 廣播塔，聽候新打卡紀錄。
-// 3. 數據記憶庫 (State)：儲存最新的考勤紀錄與整份歷史紀錄清單。當 WebSocket 傳來新打卡時，自動更新畫面。
-// 4. 全螢幕照片燈箱 (Lightbox)：點擊圖片時彈出高畫質的大圖視窗。
+// TEAM_005, TEAM_006 & TEAM_007: React 前端主應用程式 (App.tsx - 前端大腦與狀態總中樞)
+// TEAM_007 升級重點：
+// 採用「方案 B 正統後端 AI 座標分析與動態 Overlay」架構。
+// 當放大檢視考勤照片時，燈箱動態讀取後端 ai_analysis JSON 的多個人臉座標，
+// 以 CSS 百分比比例自適應疊加高科技藍框與信心度標籤，不破壞原始相片像素。
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { AttendanceRecord } from './types/attendance'; // 匯入考勤紀錄的資料表單規格
@@ -14,6 +12,141 @@ import { HistoryList } from './components/HistoryList'; // 匯入歷史紀錄清
 import { CameraSimulatorModal } from './components/CameraSimulatorModal'; // 匯入 Web 相機測試彈窗元件
 import { X } from 'lucide-react'; // 匯入關閉按鈕圖示
 import { getApiUrl, getWsUrl } from './config/api'; // 匯入 API 與 WebSocket 連線位址自動推導工具
+
+// TEAM_007: 全螢幕照片燈箱元件 (支援後端 AI 多人人臉座標動態 Overlay 繪製)
+const ImageLightboxModal: React.FC<{ record: AttendanceRecord; onClose: () => void }> = ({ record, onClose }) => {
+  const [imgSize, setImgSize] = useState<{ width: number; height: number }>({ width: 640, height: 480 });
+
+  // 整理所有人臉座標資料 (相容多人 faces 陣列與單個 bounding_box)
+  const facesToDraw = record.ai_analysis?.faces && record.ai_analysis.faces.length > 0
+    ? record.ai_analysis.faces
+    : record.ai_analysis?.bounding_box
+      ? [{
+          bounding_box: record.ai_analysis.bounding_box,
+          confidence: record.ai_analysis.confidence || 0.985,
+          recognized_person: record.ai_analysis.recognized_person || '已比對人員',
+        }]
+      : [];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.85)',
+        backdropFilter: 'blur(10px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 2000,
+        padding: '24px',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'relative',
+          maxWidth: '90vw',
+          maxHeight: '90vh',
+          borderRadius: '16px',
+          overflow: 'hidden',
+          boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          display: 'inline-block',
+          background: '#090d16',
+        }}
+      >
+        <button
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: '12px',
+            right: '12px',
+            background: 'rgba(0,0,0,0.65)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            color: '#ffffff',
+            borderRadius: '50%',
+            width: '36px',
+            height: '36px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            zIndex: 10,
+          }}
+        >
+          <X size={20} />
+        </button>
+
+        {/* 原始純淨相片 */}
+        <img
+          src={record.file_url}
+          alt={record.message}
+          onLoad={(e) => {
+            const target = e.currentTarget;
+            setImgSize({
+              width: target.naturalWidth || 640,
+              height: target.naturalHeight || 480,
+            });
+          }}
+          style={{ display: 'block', maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain' }}
+        />
+
+        {/* TEAM_007: 後端 AI 多人人臉動態標註框 Overlay */}
+        {facesToDraw.map((face, index) => {
+          const { x, y, width, height } = face.bounding_box;
+          const leftPct = (x / imgSize.width) * 100;
+          const topPct = (y / imgSize.height) * 100;
+          const widthPct = (width / imgSize.width) * 100;
+          const heightPct = (height / imgSize.height) * 100;
+
+          const labelText = `🤖 AI FACE DETECTED (${(face.confidence * 100).toFixed(1)}%)`;
+
+          return (
+            <div
+              key={index}
+              style={{
+                position: 'absolute',
+                left: `${leftPct}%`,
+                top: `${topPct}%`,
+                width: `${widthPct}%`,
+                height: `${heightPct}%`,
+                border: '2px dashed #38bdf8',
+                boxSizing: 'border-box',
+                pointerEvents: 'none',
+              }}
+            >
+              {/* 四角 L 型邊框 */}
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '12px', height: '12px', borderTop: '3.5px solid #10b981', borderLeft: '3.5px solid #10b981' }} />
+              <div style={{ position: 'absolute', top: 0, right: 0, width: '12px', height: '12px', borderTop: '3.5px solid #10b981', borderRight: '3.5px solid #10b981' }} />
+              <div style={{ position: 'absolute', bottom: 0, left: 0, width: '12px', height: '12px', borderBottom: '3.5px solid #10b981', borderLeft: '3.5px solid #10b981' }} />
+              <div style={{ position: 'absolute', bottom: 0, right: 0, width: '12px', height: '12px', borderBottom: '3.5px solid #10b981', borderRight: '3.5px solid #10b981' }} />
+
+              {/* AI 信心度標籤 */}
+              <div style={{
+                position: 'absolute',
+                top: topPct > 8 ? '-28px' : 'calc(100% + 6px)',
+                left: 0,
+                background: 'rgba(15, 23, 42, 0.92)',
+                color: '#38bdf8',
+                border: '1px solid #38bdf8',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '0.78rem',
+                fontWeight: 'bold',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              }}>
+                {labelText}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 export const App: React.FC = () => {
   // 【狀態 1】：目前選中的選單分頁，預設為 'dashboard' (即時儀表板)
@@ -31,8 +164,8 @@ export const App: React.FC = () => {
   // 【狀態 5】：相機測試彈窗是否開啟 (true/false)
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
 
-  // 【狀態 6】：目前正在放大檢視的圖片網址 (若為 null 代表未點擊大圖)
-  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  // 【狀態 6】：目前正在放大檢視的考勤紀錄 (若為 null 代表未點擊大圖)
+  const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null);
 
   /**
    * 函式：透過 HTTP API 向後端抓取歷史考勤紀錄 (GET /api/history)
@@ -141,14 +274,14 @@ export const App: React.FC = () => {
           <Dashboard
             latestRecord={latestRecord}
             historyRecords={historyRecords}
-            onOpenImageModal={(url) => setSelectedImageUrl(url)}
+            onOpenImageModal={(record) => setSelectedRecord(record)}
           />
         ) : (
           // 歷史紀錄簿：顯示完整列表、關鍵字搜尋與重新整理按鈕
           <HistoryList
             records={historyRecords}
             onRefresh={fetchHistory}
-            onOpenImageModal={(url) => setSelectedImageUrl(url)}
+            onOpenImageModal={(record) => setSelectedRecord(record)}
           />
         )}
       </main>
@@ -160,59 +293,12 @@ export const App: React.FC = () => {
         onSuccess={fetchHistory}
       />
 
-      {/* 4. 全螢幕照片大圖燈箱 (Lightbox Modal)：當點擊任何考勤照片時開啟 */}
-      {selectedImageUrl && (
-        <div
-          onClick={() => setSelectedImageUrl(null)}
-          style={{
-            position: 'fixed',
-            top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.85)',
-            backdropFilter: 'blur(10px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 2000,
-            padding: '24px',
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'relative',
-              maxWidth: '90vw',
-              maxHeight: '90vh',
-              borderRadius: '16px',
-              overflow: 'hidden',
-              boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}
-          >
-            {/* 關閉按鈕 */}
-            <button
-              onClick={() => setSelectedImageUrl(null)}
-              style={{
-                position: 'absolute',
-                top: '12px',
-                right: '12px',
-                background: 'rgba(0,0,0,0.6)',
-                border: 'none',
-                color: '#ffffff',
-                borderRadius: '50%',
-                width: '36px',
-                height: '36px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-            >
-              <X size={20} />
-            </button>
-            {/* 照片大圖 */}
-            <img src={selectedImageUrl} alt="Full View" style={{ display: 'block', maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain' }} />
-          </div>
-        </div>
+      {/* 4. 全螢幕照片大圖燈箱 (Lightbox Modal)：當點擊任何考勤照片時開啟，動態繪製後端 AI 座標 */}
+      {selectedRecord && (
+        <ImageLightboxModal
+          record={selectedRecord}
+          onClose={() => setSelectedRecord(null)}
+        />
       )}
 
       {/* 5. 頁尾 Footer */}

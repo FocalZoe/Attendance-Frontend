@@ -8,7 +8,7 @@ import { Search, RefreshCw, Eye, Calendar, User, Sparkles, CheckCircle } from 'l
 interface HistoryListProps {
   records: AttendanceRecord[];                   // 考勤紀錄總清單
   onRefresh: () => void;                          // 手動重新整理的函式
-  onOpenImageModal: (url: string) => void;        // 開啟大圖燈箱的函式
+  onOpenImageModal: (record: AttendanceRecord) => void; // 開啟大圖燈箱的函式
 }
 
 export const HistoryList: React.FC<HistoryListProps> = ({
@@ -76,7 +76,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
           >
             {/* 考勤照片容器 */}
             <div
-              onClick={() => onOpenImageModal(rec.file_url)}
+              onClick={() => onOpenImageModal(rec)}
               style={{
                 position: 'relative',
                 width: '100%',
