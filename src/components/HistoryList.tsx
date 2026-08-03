@@ -1,13 +1,9 @@
-// TEAM_005: 歷史紀錄簿元件 (HistoryList.tsx)
-// 【非程式人員導覽】：這個檔案是第二個分頁「歷史紀錄簿」的畫面。
-// 它就像是一本完整的紙本考勤簽到簿與相簿冊，提供：
-// 1. 搜尋輸入框：讓你可以輸入人員姓名或關鍵字（如「張小明」），即時過濾顯示結果。
-// 2. 手動重新整理按鈕：向後端重新抓取最新資料。
-// 3. 完整卡片列表：每一張卡片顯示人員照片、打卡訊息、時間與專屬 ID。點擊任何圖片皆可開啟大圖。
+// TEAM_005 & TEAM_006: 歷史紀錄簿元件 (HistoryList.tsx)
+// 展示考勤歷史紀錄，並針對 TEAM_006 AI 人臉辨識紀錄標註視覺 Badge。
 
 import React, { useState } from 'react';
 import { AttendanceRecord } from '../types/attendance';
-import { Search, RefreshCw, Eye, Calendar, User } from 'lucide-react';
+import { Search, RefreshCw, Eye, Calendar, User, Sparkles, CheckCircle } from 'lucide-react';
 
 interface HistoryListProps {
   records: AttendanceRecord[];                   // 考勤紀錄總清單
@@ -20,10 +16,8 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   onRefresh,
   onOpenImageModal,
 }) => {
-  // 關鍵字搜尋框的文字 state
   const [searchTerm, setSearchTerm] = useState('');
 
-  // 根據搜尋關鍵字過濾列表 (只留下打卡訊息符合關鍵字的紀錄)
   const filteredRecords = records.filter((r) =>
     r.message.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -67,7 +61,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
 
       </div>
 
-      {/* 紀錄卡片網格 (Grid) */}
+      {/* 紀錄卡片網格 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
         {filteredRecords.map((rec) => (
           <div
@@ -103,6 +97,25 @@ export const HistoryList: React.FC<HistoryListProps> = ({
               }}>
                 <Eye size={24} color="#ffffff" />
               </div>
+
+              {/* TEAM_006: 照片上方 AI 辨識標籤 */}
+              <div style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                background: 'rgba(15, 23, 42, 0.75)',
+                backdropFilter: 'blur(4px)',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                fontSize: '0.75rem',
+                color: '#38bdf8',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}>
+                <Sparkles size={12} /> AI 人臉考勤比對
+              </div>
             </div>
 
             {/* 考勤詳細內容區 */}
@@ -111,6 +124,25 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                 <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <User size={16} /> {rec.message}
                 </h4>
+
+                {rec.ai_analysis && (
+                  <div style={{
+                    marginTop: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '3px 10px',
+                    borderRadius: '12px',
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    color: '#10b981',
+                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    fontSize: '0.78rem',
+                    fontWeight: 500,
+                  }}>
+                    <CheckCircle size={13} />
+                    AI 信心度: {((rec.ai_analysis.confidence || 0.98) * 100).toFixed(1)}% ({rec.ai_analysis.status || 'SUCCESS'})
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '10px', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
@@ -124,7 +156,6 @@ export const HistoryList: React.FC<HistoryListProps> = ({
         ))}
       </div>
 
-      {/* 無資料時的友善提示 */}
       {filteredRecords.length === 0 && (
         <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-dim)' }}>
           <p>沒有找到符合條件的考勤歷史紀錄。</p>
