@@ -145,24 +145,47 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                   <User size={16} /> {rec.message}
                 </h4>
 
-                {rec.ai_analysis && (
-                  <div style={{
-                    marginTop: '8px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '3px 10px',
-                    borderRadius: '12px',
-                    background: 'rgba(16, 185, 129, 0.12)',
-                    color: '#10b981',
-                    border: '1px solid rgba(16, 185, 129, 0.25)',
-                    fontSize: '0.78rem',
-                    fontWeight: 500,
-                  }}>
-                    <CheckCircle size={13} />
-                    AI 信心度: {((rec.ai_analysis.confidence || 0.98) * 100).toFixed(1)}% ({rec.ai_analysis.status || 'SUCCESS'})
-                  </div>
-                )}
+                {/* TEAM_007: AI 信心度標籤 (防爆 JSON 解析與條件隱藏) */}
+                {(() => {
+                  let aiAnalysis = rec.ai_analysis;
+                  if (typeof aiAnalysis === 'string') {
+                    try {
+                      aiAnalysis = JSON.parse(aiAnalysis);
+                    } catch (e) {
+                      aiAnalysis = undefined;
+                    }
+                  }
+                  const hasFace = Boolean(
+                    aiAnalysis &&
+                    (aiAnalysis.detected === true ||
+                     (aiAnalysis.faces && aiAnalysis.faces.length > 0) ||
+                     (aiAnalysis.face_count && aiAnalysis.face_count > 0))
+                  );
+
+                  if (!hasFace || !aiAnalysis) return null;
+
+                  const confidencePct = ((aiAnalysis.confidence || 0.98) * 100).toFixed(1);
+                  const statusText = aiAnalysis.status || 'SUCCESS';
+
+                  return (
+                    <div style={{
+                      marginTop: '8px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '3px 10px',
+                      borderRadius: '12px',
+                      background: 'rgba(16, 185, 129, 0.12)',
+                      color: '#10b981',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                      fontSize: '0.78rem',
+                      fontWeight: 500,
+                    }}>
+                      <CheckCircle size={13} />
+                      AI 信心度: {confidencePct}% ({statusText})
+                    </div>
+                  );
+                })()}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '10px', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
