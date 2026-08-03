@@ -75,48 +75,68 @@ export const HistoryList: React.FC<HistoryListProps> = ({
             }}
           >
             {/* 考勤照片容器 */}
-            <div
-              onClick={() => onOpenImageModal(rec)}
-              style={{
-                position: 'relative',
-                width: '100%',
-                height: '200px',
-                background: '#090d16',
-                cursor: 'pointer',
-                overflow: 'hidden',
-              }}
-            >
-              <img
-                src={rec.file_url}
-                alt={rec.message}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-              <div style={{
-                position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', opacity: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'opacity 0.2s',
-              }}>
-                <Eye size={24} color="#ffffff" />
-              </div>
+            {(() => {
+              let aiAnalysis = rec.ai_analysis;
+              if (typeof aiAnalysis === 'string') {
+                try {
+                  aiAnalysis = JSON.parse(aiAnalysis);
+                } catch (e) {}
+              }
+              const hasFace = Boolean(
+                aiAnalysis &&
+                (aiAnalysis.detected === true ||
+                 (aiAnalysis.faces && aiAnalysis.faces.length > 0) ||
+                 (aiAnalysis.face_count && aiAnalysis.face_count > 0))
+              );
 
-              {/* TEAM_006: 照片上方 AI 辨識標籤 */}
-              <div style={{
-                position: 'absolute',
-                top: '10px',
-                right: '10px',
-                background: 'rgba(15, 23, 42, 0.75)',
-                backdropFilter: 'blur(4px)',
-                padding: '4px 10px',
-                borderRadius: '12px',
-                fontSize: '0.75rem',
-                color: '#38bdf8',
-                border: '1px solid rgba(56, 189, 248, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}>
-                <Sparkles size={12} /> AI 人臉考勤比對
-              </div>
-            </div>
+              return (
+                <div
+                  onClick={() => onOpenImageModal(rec)}
+                  style={{
+                    position: 'relative',
+                    width: '100%',
+                    height: '200px',
+                    background: '#090d16',
+                    cursor: 'pointer',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <img
+                    src={rec.file_url}
+                    alt={rec.message}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                  <div style={{
+                    position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', opacity: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'opacity 0.2s',
+                  }}>
+                    <Eye size={24} color="#ffffff" />
+                  </div>
+
+                  {/* TEAM_007: 僅在有人臉狀態時，預覽圖片右上角顯示 AI 人臉比對 標籤 */}
+                  {hasFace && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '10px',
+                      right: '10px',
+                      background: 'rgba(15, 23, 42, 0.8)',
+                      backdropFilter: 'blur(4px)',
+                      padding: '4px 10px',
+                      borderRadius: '12px',
+                      fontSize: '0.75rem',
+                      color: '#38bdf8',
+                      border: '1px solid rgba(56, 189, 248, 0.45)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      zIndex: 2,
+                    }}>
+                      <Sparkles size={12} /> AI 人臉比對
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* 考勤詳細內容區 */}
             <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, justifyContent: 'space-between' }}>
