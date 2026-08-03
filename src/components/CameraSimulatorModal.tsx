@@ -1,7 +1,7 @@
 // TEAM_005, TEAM_006 & TEAM_007: Web 實體相機打卡與 AI 視覺辨識測試彈窗 (CameraSimulatorModal.tsx)
 // TEAM_007 升級重點：
 // 1. 整合 MediaPipe 即時前端人臉偵測，動態計算與繪製所有真實人臉外框 (Bounding Boxes)。
-// 2. 當無人臉時呈現警示，並防止無人臉卻誤標 98.5% 的虛假提示。
+// 2. 加入人臉畫框平滑緩衝 (Smoothed Detections Cache) 消除 60fps 影格同步造成的閃爍問題。
 
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Camera, Send, RefreshCw, VideoOff, CheckCircle2, AlertCircle, ScanFace, Sparkles } from 'lucide-react';
@@ -65,6 +65,10 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
   const animFrameIdRef = useRef<number | null>(null);
   const lastVideoTimeRef = useRef<number>(-1);
 
+  // TEAM_007: 快取偵測結果與時間戳記，避免影格間隙導致畫框閃爍
+  const lastDetectionsRef = useRef<any[]>([]);
+  const lastFaceTimeRef = useRef<number>(0);
+
   const getCameraDevices = async () => {
     try {
       const allDevices = await navigator.mediaDevices.enumerateDevices();
@@ -115,9 +119,10 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
     }
     setCameraActive(false);
     setDetectedFacesCount(0);
+    lastDetectionsRef.current = [];
   };
 
-  // TEAM_007: 即時 AI 人臉追蹤畫框與座標動態繪製 (MediaPipe Face Detection)
+  // TEAM_007: 即時 AI 人臉追蹤畫框與座標動態繪製 (MediaPipe Face Detection + Anti-Flicker)
   useEffect(() => {
     if (!cameraActive) return;
 
@@ -148,18 +153,28 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
         if (ctx) {
           ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-          let detections: any[] = [];
+          const now = performance.now();
           if (faceDetector && video.currentTime !== lastVideoTimeRef.current) {
             lastVideoTimeRef.current = video.currentTime;
             try {
-              const results = faceDetector.detectForVideo(video, performance.now());
-              detections = results.detections || [];
+              const results = faceDetector.detectForVideo(video, now);
+              const newDetections = results.detections || [];
+              if (newDetections.length > 0) {
+                lastDetectionsRef.current = newDetections;
+                lastFaceTimeRef.current = now;
+              } else if (now - lastFaceTimeRef.current > 350) {
+                // 超過 350ms 未偵測到人臉才清空，防止影格間隙閃爍
+                lastDetectionsRef.current = [];
+              }
             } catch (e) {
               // 容錯
             }
           }
 
-          setDetectedFacesCount(detections.length);
+          const detections = lastDetectionsRef.current;
+
+          // 僅在人數改變時觸發 React state 更新
+          setDetectedFacesCount((prev) => (prev !== detections.length ? detections.length : prev));
 
           if (detections.length > 0) {
             // 計算 object-fit: cover 的顯示映射比例與偏移量
@@ -183,7 +198,7 @@ export const CameraSimulatorModal: React.FC<RealCameraModalProps> = ({
 
             const scale = renderW / vWidth;
 
-            // TEAM_007: 依據使用者指示，繪製所有偵測到的真實人臉邊框
+            // 繪製所有偵測到的真實人臉邊框
             detections.forEach((detection) => {
               const { originX, originY, width, height } = detection.boundingBox;
               const confidence = detection.categories[0]?.score || 0.95;
