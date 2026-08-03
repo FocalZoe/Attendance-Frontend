@@ -2,7 +2,7 @@
 // TEAM_007 升級重點：
 // 採用「方案 B 正統後端 AI 座標分析與動態 Overlay」架構。
 // 當放大檢視考勤照片時，燈箱動態讀取後端 ai_analysis JSON 的多個人臉座標，
-// 以 CSS 百分比比例自適應疊加高科技藍框與信心度標籤，不破壞原始相片像素。
+// 以 CSS 百分比比例與動態比例容器 (aspectRatio) 自適應疊加高科技藍框與信心度標籤，不破壞原始相片像素。
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { AttendanceRecord } from './types/attendance'; // 匯入考勤紀錄的資料表單規格
@@ -17,16 +17,28 @@ import { getApiUrl, getWsUrl } from './config/api'; // 匯入 API 與 WebSocket 
 const ImageLightboxModal: React.FC<{ record: AttendanceRecord; onClose: () => void }> = ({ record, onClose }) => {
   const [imgSize, setImgSize] = useState<{ width: number; height: number }>({ width: 640, height: 480 });
 
-  // 整理所有人臉座標資料 (相容多人 faces 陣列與單個 bounding_box)
-  const facesToDraw = record.ai_analysis?.faces && record.ai_analysis.faces.length > 0
-    ? record.ai_analysis.faces
-    : record.ai_analysis?.bounding_box
+  // 1. 安全解析 ai_analysis (防範 Supabase 回傳 JSON 字串狀態)
+  let aiAnalysis = record.ai_analysis;
+  if (typeof aiAnalysis === 'string') {
+    try {
+      aiAnalysis = JSON.parse(aiAnalysis);
+    } catch (e) {
+      aiAnalysis = undefined;
+    }
+  }
+
+  // 2. 整理所有人臉座標資料 (相容多人 faces 陣列與單個 bounding_box)
+  const facesToDraw = aiAnalysis?.faces && aiAnalysis.faces.length > 0
+    ? aiAnalysis.faces
+    : aiAnalysis?.bounding_box && (aiAnalysis.bounding_box.width > 0 || aiAnalysis.bounding_box.x > 0)
       ? [{
-          bounding_box: record.ai_analysis.bounding_box,
-          confidence: record.ai_analysis.confidence || 0.985,
-          recognized_person: record.ai_analysis.recognized_person || '已比對人員',
+          bounding_box: aiAnalysis.bounding_box,
+          confidence: aiAnalysis.confidence || 0.985,
+          recognized_person: aiAnalysis.recognized_person || '已比對人員',
         }]
       : [];
+
+  const aspect = imgSize.width / imgSize.height;
 
   return (
     <div
@@ -48,12 +60,12 @@ const ImageLightboxModal: React.FC<{ record: AttendanceRecord; onClose: () => vo
         style={{
           position: 'relative',
           maxWidth: '90vw',
-          maxHeight: '90vh',
+          maxHeight: '85vh',
+          aspectRatio: `${aspect}`,
           borderRadius: '16px',
           overflow: 'hidden',
           boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          display: 'inline-block',
+          border: '1px solid rgba(56, 189, 248, 0.3)',
           background: '#090d16',
         }}
       >
@@ -85,15 +97,17 @@ const ImageLightboxModal: React.FC<{ record: AttendanceRecord; onClose: () => vo
           alt={record.message}
           onLoad={(e) => {
             const target = e.currentTarget;
-            setImgSize({
-              width: target.naturalWidth || 640,
-              height: target.naturalHeight || 480,
-            });
+            if (target.naturalWidth > 0 && target.naturalHeight > 0) {
+              setImgSize({
+                width: target.naturalWidth,
+                height: target.naturalHeight,
+              });
+            }
           }}
-          style={{ display: 'block', maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain' }}
+          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
         />
 
-        {/* TEAM_007: 後端 AI 多人人臉動態標註框 Overlay */}
+        {/* TEAM_007: 後端 AI 多人人臉動態標註框 Overlay (百分比自適應) */}
         {facesToDraw.map((face, index) => {
           const { x, y, width, height } = face.bounding_box;
           const leftPct = (x / imgSize.width) * 100;
@@ -101,7 +115,8 @@ const ImageLightboxModal: React.FC<{ record: AttendanceRecord; onClose: () => vo
           const widthPct = (width / imgSize.width) * 100;
           const heightPct = (height / imgSize.height) * 100;
 
-          const labelText = `🤖 AI FACE DETECTED (${(face.confidence * 100).toFixed(1)}%)`;
+          const confidence = face.confidence || aiAnalysis?.confidence || 0.985;
+          const labelText = `🤖 AI FACE DETECTED (${(confidence * 100).toFixed(1)}%)`;
 
           return (
             <div
